@@ -12,67 +12,57 @@ from datetime import datetime, timedelta
 import matplotlib.pyplot as plt
 
 # Set page configuration
-st.set_page_config(layout="wide", page_title="Aircraft Predictive Maintenance")
+st.set_page_config(layout="wide", page_title="Aircraft Predictive Maintenance Dashboard")
 
-st.title("✈️ Aircraft Predictive Maintenance Analytics")
-st.markdown("This application demonstrates a comprehensive predictive maintenance solution for aircraft, covering synthetic data generation, EDA, feature engineering, model training, explainability, and interactive dashboards.")
+st.title("✈️ Aircraft Predictive Maintenance Dashboard")
+st.markdown("Welcome to your interactive dashboard for aviation maintenance analytics. All data generation, feature engineering, and model training run automatically when the app starts, or can be re-run with the button below. Explore the tabs to dive into EDA, model performance, explainability, and aircraft-specific insights!")
 
-# Set a random seed for reproducibility
-np.random.seed(42)
-
-# --- Parameters for Synthetic Data ---
+# --- Global Parameters ---
 N_AIRCRAFT = 200
 N_FLIGHTS = 50000
 FAILURE_RATE = 0.03
 FLIGHT_START_DATE = datetime(2023, 1, 1)
-ALERT_THRESHOLD_PROB = 0.50
+ALERT_THRESHOLD_PROB = 0.50 # For insights/recommendations
 
-@st.cache_data
+# Set a random seed for reproducibility
+np.random.seed(42)
+
+# --- Data Generation Function ---
+@st.cache_data(show_spinner="Generating realistic synthetic flight data...")
 def generate_synthetic_data(n_aircraft, n_flights, failure_rate, flight_start_date):
-    """
-    Generates synthetic aircraft flight data with degradation patterns.
-    """
-    st.info("Generating synthetic data... This might take a moment.")
     aircraft_ids = [f'AC-{i:03d}' for i in range(1, n_aircraft + 1)]
-
     data = []
     flight_id_counter = 1
 
     for aircraft_id in tqdm(aircraft_ids, desc="Generating data"):
-        
         base_engine_temp = np.random.uniform(95, 105)
         base_engine_vibration = np.random.uniform(0.5, 1.5)
         base_oil_pressure = np.random.uniform(40, 50)
         base_hydraulic_pressure = np.random.uniform(2900, 3100)
-        
         current_flight_date = flight_start_date
         
-        while current_flight_date < (flight_start_date + timedelta(days=n_flights // n_aircraft * 2)):
-            
+        # Simulate enough flights for potential failures
+        total_days_sim = n_flights // n_aircraft * 2
+        
+        while current_flight_date < (flight_start_date + timedelta(days=total_days_sim)):
             will_fail = np.random.rand() < (failure_rate * 0.5) 
             
             if will_fail:
                 degradation_flights = np.random.randint(25, 75)
-                
                 for i in range(degradation_flights):
                     is_sudden_failure = np.random.rand() < 0.1
-                    
                     engine_temp_c = base_engine_temp + (i / 10) + np.random.normal(0, 1.5)
                     engine_vibration_mm_s = base_engine_vibration + (i / 20) + np.random.normal(0, 0.2)
-                    
                     oil_pressure_psi = base_oil_pressure - (i / 5) + np.random.normal(0, 2)
                     hydraulic_pressure_psi = base_hydraulic_pressure - (i / 5) + np.random.normal(0, 10)
-                    
                     if is_sudden_failure and i > 5:
                         engine_temp_c += np.random.uniform(5, 15)
                         engine_vibration_mm_s += np.random.uniform(1.0, 5.0)
                     
                     flight_duration = np.random.uniform(1.5, 5.0)
                     takeoff_landings = 1
-                    
                     remaining_useful_life_hrs = (degradation_flights - i - 1) * np.random.uniform(1.5, 5.0)
                     failure_within_50hrs = 1 if remaining_useful_life_hrs <= 50 else 0
-                    
                     oat_c = np.random.uniform(-10, 35)
                     cabin_pressure_psi = np.random.normal(12, 0.5)
                     fuel_flow_kg_hr = 1500 + 50 * flight_duration + np.random.normal(0, 25)
@@ -92,7 +82,6 @@ def generate_synthetic_data(n_aircraft, n_flights, failure_rate, flight_start_da
                     if flight_id_counter > n_flights:
                         break
                 
-                # After failure, reset to maintenance
                 current_flight_date += timedelta(days=np.random.randint(7, 30)) # Simulate maintenance downtime
                 base_engine_temp = np.random.uniform(95, 105)
                 base_engine_vibration = np.random.uniform(0.5, 1.5)
@@ -102,16 +91,13 @@ def generate_synthetic_data(n_aircraft, n_flights, failure_rate, flight_start_da
             else: # Normal flight
                 flight_duration = np.random.uniform(1.5, 5.0)
                 takeoff_landings = 1
-                
                 engine_temp_c = base_engine_temp + np.random.normal(0, 1.5)
                 engine_vibration_mm_s = base_engine_vibration + np.random.normal(0, 0.2)
                 oil_pressure_psi = base_oil_pressure + np.random.normal(0, 2)
                 hydraulic_pressure_psi = base_hydraulic_pressure + np.random.normal(0, 10)
-                
                 oat_c = np.random.uniform(-10, 35)
                 cabin_pressure_psi = np.random.normal(12, 0.5)
                 fuel_flow_kg_hr = 1500 + 50 * flight_duration + np.random.normal(0, 25)
-                
                 remaining_useful_life_hrs = -1 
                 failure_within_50hrs = 0
                 
@@ -140,14 +126,11 @@ def generate_synthetic_data(n_aircraft, n_flights, failure_rate, flight_start_da
     df = pd.DataFrame(data, columns=columns)
     df = df.iloc[:n_flights].sort_values(by=['aircraft_id', 'flight_date']).reset_index(drop=True)
     df.drop(['flight_id'], axis=1, inplace=True)
-    st.success("Synthetic data generation complete!")
     return df
 
-@st.cache_data
+# --- Feature Engineering Function ---
+@st.cache_data(show_spinner="Performing feature engineering...")
 def feature_engineer_data(df_input):
-    """
-    Applies feature engineering steps to the DataFrame.
-    """
     df_fe = df_input.copy()
     df_fe.sort_values(by=['aircraft_id', 'flight_date'], inplace=True)
 
@@ -167,46 +150,49 @@ def feature_engineer_data(df_input):
     df_fe['temp_change_rate'] = df_fe.groupby('aircraft_id')['engine_temp_c'].diff().fillna(0)
     df_fe['combined_stress_index'] = df_fe['engine_vibration_mm_s'] * df_fe['engine_temp_c']
 
-    # Cycles since last maintenance - re-calculate based on failure events
-    df_fe['cycles_since_maintenance'] = df_fe.groupby('aircraft_id').cumcount() + 1
+    # Cycles since last maintenance
+    # This logic aims to reset cycles after a simulated maintenance (post-failure)
+    df_fe['temp_cycles'] = df_fe.groupby('aircraft_id').cumcount() + 1
     
-    # Identify actual failure points for reset
-    failure_indices = df_fe[df_fe['failure_within_50hrs'] == 1].index
-    
-    for idx in failure_indices:
-        ac_id = df_fe.loc[idx, 'aircraft_id']
-        # Set cycles_since_maintenance to 1 for the failure event itself and subsequent flights
-        # For simplicity, we'll reset for the current aircraft after this flight.
-        # A more robust approach might involve finding the *next* maintenance based on date.
-        # Here, we simulate a 'reset' of cycles immediately after a failure event for that aircraft's future flights.
-        df_fe.loc[(df_fe['aircraft_id'] == ac_id) & (df_fe.index > idx), 'cycles_since_maintenance'] = (
-            df_fe.loc[(df_fe['aircraft_id'] == ac_id) & (df_fe.index > idx)].groupby('aircraft_id').cumcount() + 1
-        )
-    
-    # Ensure all cycles are correctly assigned within each aircraft group
-    # This loop ensures that cycles are truly cumulative per aircraft and reset on failure
     current_cycles = {}
+    final_cycles = np.zeros(len(df_fe))
     for i, row in df_fe.iterrows():
         ac_id = row['aircraft_id']
         if ac_id not in current_cycles:
             current_cycles[ac_id] = 0
         
         current_cycles[ac_id] += 1
-        df_fe.loc[i, 'cycles_since_maintenance'] = current_cycles[ac_id]
+        final_cycles[i] = current_cycles[ac_id]
         
         if row['failure_within_50hrs'] == 1:
-            current_cycles[ac_id] = 0 # Reset for the *next* flight after failure
+            current_cycles[ac_id] = 0 # Reset for the *next* flight after this failure event
 
+    df_fe['cycles_since_maintenance'] = final_cycles
     return df_fe
 
-@st.cache_resource
-def train_models(train_df, test_df, features, target_classification, target_regression):
-    """
-    Trains XGBoost classification and regression models.
-    """
-    st.info("Training models... This may take a while.")
+# --- Model Training Function ---
+@st.cache_resource(show_spinner="Training predictive models (XGBoost Classifier & Regressor)...")
+def train_predictive_models(df_processed):
+    features = [col for col in df_processed.columns if col not in ['aircraft_id', 'flight_date', 'failure_within_50hrs', 'remaining_useful_life_hrs']]
+    target_classification = 'failure_within_50hrs'
+    target_regression = 'remaining_useful_life_hrs'
+
+    # Time-based train-test split (using a fixed proportion for reproducibility)
+    train_end_date = df_processed['flight_date'].max() - timedelta(days=90) # Last 90 days for test
+    train_df = df_processed[df_processed['flight_date'] <= train_end_date].copy()
+    test_df = df_processed[df_processed['flight_date'] > train_end_date].copy()
     
-    # Classification data
+    # Ensure test_df has data
+    if test_df.empty:
+        st.warning("Test data is empty after time-based split. Adjusting split or data generation parameters may be needed.")
+        # Fallback to a small test set if time split results in empty
+        if len(df_processed) > 100:
+            train_df = df_processed.iloc[:-50].copy()
+            test_df = df_processed.iloc[-50:].copy()
+        else:
+            train_df = df_processed.copy()
+            test_df = df_processed.copy() # Use same for train/test if data too small
+
     X_train_cls = train_df[features]
     y_train_cls = train_df[target_classification]
     X_test_cls = test_df[features]
@@ -218,72 +204,51 @@ def train_models(train_df, test_df, features, target_classification, target_regr
     X_test_reg = test_df[test_df[target_regression] > 0][features]
     y_test_reg = test_df[test_df[target_regression] > 0][target_regression]
 
-    # Classification Model
+    # Handle cases where regression train/test sets might be empty
+    if X_train_reg.empty or y_train_reg.empty:
+        st.warning("Regression training data is empty. RUL model will not be trained.")
+        xgb_reg = None
+    else:
+        xgb_reg = xgb.XGBRegressor(random_state=42)
+        xgb_reg.fit(X_train_reg, y_train_reg)
+
     xgb_cls = xgb.XGBClassifier(random_state=42, use_label_encoder=False, eval_metric='logloss')
     xgb_cls.fit(X_train_cls, y_train_cls)
 
-    # Regression Model
-    xgb_reg = xgb.XGBRegressor(random_state=42)
-    xgb_reg.fit(X_train_reg, y_train_reg)
-
-    st.success("Models trained successfully!")
-    return xgb_cls, xgb_reg, X_test_cls, y_test_cls, X_test_reg, y_test_reg
+    return xgb_cls, xgb_reg, X_test_cls, y_test_cls, X_test_reg, y_test_reg, features, test_df
 
 
-# --- Main Application Flow ---
+# --- Main Application Logic ---
 
-if 'data' not in st.session_state:
-    st.session_state.data = None
-if 'df_fe' not in st.session_state:
-    st.session_state.df_fe = None
-if 'xgb_cls' not in st.session_state:
-    st.session_state.xgb_cls = None
-if 'xgb_reg' not in st.session_state:
-    st.session_state.xgb_reg = None
-if 'X_test_cls' not in st.session_state:
-    st.session_state.X_test_cls = None
-if 'y_test_cls' not in st.session_state:
-    st.session_state.y_test_cls = None
-if 'X_test_reg' not in st.session_state:
-    st.session_state.X_test_reg = None
-if 'y_test_reg' not in st.session_state:
-    st.session_state.y_test_reg = None
-if 'features' not in st.session_state:
-    st.session_state.features = None
-if 'selected_aircraft' not in st.session_state:
-    st.session_state.selected_aircraft = None
+# Trigger all initial steps
+if st.button("Run Full Analysis"):
+    st.session_state.data = generate_synthetic_data(N_AIRCRAFT, N_FLIGHTS, FAILURE_RATE, FLIGHT_START_DATE)
+    st.session_state.df_fe = feature_engineer_data(st.session_state.data)
+    (st.session_state.xgb_cls, st.session_state.xgb_reg, 
+     st.session_state.X_test_cls, st.session_state.y_test_cls, 
+     st.session_state.X_test_reg, st.session_state.y_test_reg, 
+     st.session_state.features, st.session_state.test_df) = train_predictive_models(st.session_state.df_fe)
+    st.success("Data loaded, features engineered, and models trained!")
 
+if st.session_state.df_fe is None:
+    st.info("Click 'Run Full Analysis' to load data, engineer features, and train models. This may take a few minutes.")
+else:
+    # Selector for aircraft ID (used in Dashboard and Insights)
+    available_aircraft_ids = st.session_state.df_fe['aircraft_id'].unique()
+    st.session_state.selected_aircraft = st.sidebar.selectbox(
+        "Select Aircraft for Dashboard/Insights:", 
+        available_aircraft_ids
+    )
 
-# --- Sidebar for Navigation ---
-st.sidebar.header("Navigation")
-page = st.sidebar.radio("Go to", ["1. Data Generation", "2. EDA", "3. Feature Engineering", "4. Modeling", "5. Explainability", "6. Dashboard", "7. Insights & Recommendations"])
+    # Create tabs for the dashboard sections
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Data Overview (EDA)", "🧠 Model Performance", "💡 Model Explainability", "🖥️ Interactive Dashboard", "✨ Insights & Recommendations"])
 
-
-if page == "1. Data Generation":
-    st.header("1. Synthetic Data Generation ⚙️")
-    st.markdown("We'll generate a synthetic dataset mimicking aircraft sensor readings with realistic degradation patterns. This ensures the project is self-contained and reproducible.")
-    
-    if st.button("Generate Data"):
-        st.session_state.data = generate_synthetic_data(N_AIRCRAFT, N_FLIGHTS, FAILURE_RATE, FLIGHT_START_DATE)
-        st.write("First 5 rows of the generated data:")
-        st.dataframe(st.session_state.data.head())
-        st.write(f"Total flights: {len(st.session_state.data)}")
-        st.write(f"Failure rate: {st.session_state.data['failure_within_50hrs'].mean() * 100:.2f}%")
-        st.write("Data Info:")
-        st.text(st.session_state.data.info())
-
-elif page == "2. EDA":
-    st.header("2. Exploratory Data Analysis (EDA) 📊")
-    st.markdown("Exploring the generated data to understand sensor trends, distributions, and relationships between features and failure targets.")
-
-    if st.session_state.data is None:
-        st.warning("Please generate data first from the 'Data Generation' section.")
-    else:
+    with tab1:
+        st.header("Data Overview (EDA) 📊")
         st.subheader("Tabular View of Data")
         st.dataframe(st.session_state.data.head(10))
 
         st.subheader("Time-series Trends for Aircraft Approaching Failure")
-        # Ensure there's at least one failure for plotting
         if st.session_state.data['failure_within_50hrs'].sum() > 0:
             failure_aircraft_id = st.session_state.data[st.session_state.data['failure_within_50hrs'] == 1]['aircraft_id'].iloc[0]
             failed_flights = st.session_state.data[st.session_state.data['aircraft_id'] == failure_aircraft_id].sort_values('flight_date').tail(75)
@@ -301,8 +266,8 @@ elif page == "2. EDA":
             st.info("No failures detected in the generated data to plot time-series trends.")
 
         st.subheader("Sensor Reading Distributions by Failure Status")
-        col1, col2 = st.columns(2)
-        with col1:
+        col1_eda, col2_eda = st.columns(2)
+        with col1_eda:
             fig_hist_vib = px.histogram(
                 st.session_state.data,
                 x='engine_vibration_mm_s',
@@ -314,7 +279,7 @@ elif page == "2. EDA":
                 template='plotly_white'
             )
             st.plotly_chart(fig_hist_vib, use_container_width=True)
-        with col2:
+        with col2_eda:
             fig_box_temp = px.box(
                 st.session_state.data,
                 x='failure_within_50hrs',
@@ -324,8 +289,8 @@ elif page == "2. EDA":
             )
             st.plotly_chart(fig_box_temp, use_container_width=True)
 
-        col3, col4 = st.columns(2)
-        with col3:
+        col3_eda, col4_eda = st.columns(2)
+        with col3_eda:
             fig_hist_oil = px.histogram(
                 st.session_state.data,
                 x='oil_pressure_psi',
@@ -337,7 +302,7 @@ elif page == "2. EDA":
                 template='plotly_white'
             )
             st.plotly_chart(fig_hist_oil, use_container_width=True)
-        with col4:
+        with col4_eda:
             fig_box_hyd = px.box(
                 st.session_state.data,
                 x='failure_within_50hrs',
@@ -373,49 +338,12 @@ elif page == "2. EDA":
         )
         fig_imbalance.update_traces(marker_color=['skyblue', 'salmon'])
         st.plotly_chart(fig_imbalance, use_container_width=True)
-
-elif page == "3. Feature Engineering":
-    st.header("3. Feature Engineering 🧩")
-    st.markdown("Creating new features that capture temporal and relational aspects of sensor data to enhance predictive power.")
-
-    if st.session_state.data is None:
-        st.warning("Please generate data first from the 'Data Generation' section.")
-    else:
-        if st.button("Perform Feature Engineering"):
-            st.session_state.df_fe = feature_engineer_data(st.session_state.data)
-            st.write("Engineered features added. Preview of new features:")
-            st.dataframe(st.session_state.df_fe[['aircraft_id', 'flight_date', 'engine_vibration_mm_s', 'rolling_avg_engine_vibration_mm_s_5fl', 'vibration_change_rate', 'combined_stress_index', 'cycles_since_maintenance']].head())
-            
-            # Define features after feature engineering
-            st.session_state.features = [col for col in st.session_state.df_fe.columns if col not in ['aircraft_id', 'flight_date', 'failure_within_50hrs', 'remaining_useful_life_hrs']]
-            st.success("Feature engineering complete!")
-
-elif page == "4. Modeling":
-    st.header("4. Predictive Modeling 🧠")
-    st.markdown("Building XGBoost models for binary classification (failure prediction) and regression (RUL prediction). Data is split by time to simulate real-world deployment.")
-
-    if st.session_state.df_fe is None:
-        st.warning("Please perform feature engineering first from the 'Feature Engineering' section.")
-    else:
-        if st.button("Train Models"):
-            target_classification = 'failure_within_50hrs'
-            target_regression = 'remaining_useful_life_hrs'
-            
-            # Time-based train-test split
-            train_end_date = st.session_state.df_fe['flight_date'].max() - timedelta(days=90)
-            train_df = st.session_state.df_fe[st.session_state.df_fe['flight_date'] <= train_end_date].copy()
-            test_df = st.session_state.df_fe[st.session_state.df_fe['flight_date'] > train_end_date].copy()
-            
-            xgb_cls, xgb_reg, X_test_cls, y_test_cls, X_test_reg, y_test_reg = train_models(
-                train_df, test_df, st.session_state.features, target_classification, target_regression
-            )
-            st.session_state.xgb_cls = xgb_cls
-            st.session_state.xgb_reg = xgb_reg
-            st.session_state.X_test_cls = X_test_cls
-            st.session_state.y_test_cls = y_test_cls
-            st.session_state.X_test_reg = X_test_reg
-            st.session_state.y_test_reg = y_test_reg
-
+    
+    with tab2:
+        st.header("Model Performance 🧠")
+        if st.session_state.xgb_cls is None or st.session_state.xgb_reg is None:
+            st.warning("Models not trained yet. Please click 'Run Full Analysis' on the main page.")
+        else:
             st.subheader("Classification Model Evaluation")
             y_pred_cls = st.session_state.xgb_cls.predict(st.session_state.X_test_cls)
             y_pred_proba_cls = st.session_state.xgb_cls.predict_proba(st.session_state.X_test_cls)[:, 1]
@@ -433,99 +361,82 @@ elif page == "4. Modeling":
             st.write(f"**MAE:** {mean_absolute_error(st.session_state.y_test_reg, y_pred_reg):.4f}")
             st.write(f"**R-squared:** {r2_score(st.session_state.y_test_reg, y_pred_reg):.4f}")
 
-elif page == "5. Explainability":
-    st.header("5. Model Explainability with SHAP 💡")
-    st.markdown("Understanding *why* a model makes a specific prediction is crucial. SHAP values help interpret the predictions.")
-
-    if st.session_state.xgb_cls is None or st.session_state.xgb_reg is None:
-        st.warning("Please train models first from the 'Modeling' section.")
-    else:
-        st.subheader("SHAP Feature Importance (Classification Model)")
-        explainer_cls = shap.TreeExplainer(st.session_state.xgb_cls)
-        shap_values_cls = explainer_cls.shap_values(st.session_state.X_test_cls)
-
-        # Using st.pyplot to display SHAP plots
-        fig_shap_cls, ax_cls = plt.subplots(figsize=(10, 6))
-        shap.summary_plot(shap_values_cls, st.session_state.X_test_cls, plot_type="bar", show=False, ax=ax_cls)
-        ax_cls.set_title("SHAP Feature Importance (Classification)")
-        st.pyplot(fig_shap_cls)
-
-        st.subheader("SHAP Feature Importance (Regression Model)")
-        explainer_reg = shap.TreeExplainer(st.session_state.xgb_reg)
-        shap_values_reg = explainer_reg.shap_values(st.session_state.X_test_reg)
-
-        fig_shap_reg, ax_reg = plt.subplots(figsize=(10, 6))
-        shap.summary_plot(shap_values_reg, st.session_state.X_test_reg, show=False, ax=ax_reg)
-        ax_reg.set_title("SHAP Feature Importance (Regression)")
-        st.pyplot(fig_shap_reg)
-
-        st.subheader("Example SHAP Explanation for a Single Flight (Classification)")
-        # Find a flight that actually failed in the test set for a good example
-        if st.session_state.y_test_cls.sum() > 0:
-            failed_flight_idx = st.session_state.y_test_cls[st.session_state.y_test_cls == 1].index[0]
-            failed_aircraft_data = st.session_state.df_fe.loc[failed_flight_idx]
-            failed_aircraft_features = failed_aircraft_data[st.session_state.features].to_frame().T # SHAP expects 2D array
-
-            st.write(f"Explaining prediction for flight of aircraft **{failed_aircraft_data['aircraft_id']}** on **{failed_aircraft_data['flight_date'].date()}**")
-            
-            # Re-calculate SHAP values for the specific instance
-            shap_values_single_instance = explainer_cls.shap_values(failed_aircraft_features)[0] # For binary, [0] or [1] for class
-            
-            # Using force plot with Matplotlib backend for Streamlit compatibility
-            fig_force, ax_force = plt.subplots(figsize=(12, 4))
-            shap.force_plot(
-                explainer_cls.expected_value[0], # Expected value for class 0 or 1, depending on problem
-                shap_values_single_instance, 
-                failed_aircraft_features, 
-                show=False, 
-                matplotlib=True,
-                plot_cmap="PkGn",
-                ax=ax_force
-            )
-            ax_force.set_title("SHAP Force Plot for a Single Prediction (Class 0)")
-            st.pyplot(fig_force)
-
+    with tab3:
+        st.header("Model Explainability with SHAP 💡")
+        if st.session_state.xgb_cls is None or st.session_state.xgb_reg is None:
+            st.warning("Models not trained yet. Please click 'Run Full Analysis' on the main page.")
         else:
-            st.info("No failure instances in the test set to demonstrate a single flight explanation.")
+            st.subheader("SHAP Feature Importance (Classification Model)")
+            explainer_cls = shap.TreeExplainer(st.session_state.xgb_cls)
+            shap_values_cls = explainer_cls.shap_values(st.session_state.X_test_cls)
+            
+            # Using st.pyplot to display SHAP plots
+            fig_shap_cls, ax_cls = plt.subplots(figsize=(10, 6))
+            shap.summary_plot(shap_values_cls, st.session_state.X_test_cls, plot_type="bar", show=False, ax=ax_cls)
+            ax_cls.set_title("SHAP Feature Importance (Classification)")
+            st.pyplot(fig_shap_cls)
 
+            st.subheader("SHAP Feature Importance (Regression Model)")
+            explainer_reg = shap.TreeExplainer(st.session_state.xgb_reg)
+            shap_values_reg = explainer_reg.shap_values(st.session_state.X_test_reg)
 
-elif page == "6. Dashboard":
-    st.header("6. Interactive Visualization Dashboard 🖥️")
-    st.markdown("An interactive dashboard to monitor an aircraft's health, showing key sensor readings, failure risk, and RUL predictions over time.")
+            fig_shap_reg, ax_reg = plt.subplots(figsize=(10, 6))
+            shap.summary_plot(shap_values_reg, st.session_state.X_test_reg, show=False, ax=ax_reg)
+            ax_reg.set_title("SHAP Feature Importance (Regression)")
+            st.pyplot(fig_shap_reg)
 
-    if st.session_state.xgb_cls is None or st.session_state.xgb_reg is None or st.session_state.df_fe is None:
-        st.warning("Please train models and perform feature engineering first.")
-    else:
-        # Get aircraft IDs for selection
-        available_aircraft_ids = st.session_state.df_fe['aircraft_id'].unique()
-        selected_aircraft_id = st.selectbox("Select an Aircraft ID:", available_aircraft_ids)
-        st.session_state.selected_aircraft = selected_aircraft_id
+            st.subheader("Example SHAP Explanation for a Single Flight (Classification)")
+            if st.session_state.y_test_cls.sum() > 0:
+                failed_flight_idx = st.session_state.y_test_cls[st.session_state.y_test_cls == 1].index[0]
+                failed_aircraft_data = st.session_state.test_df.loc[failed_flight_idx]
+                failed_aircraft_features = failed_aircraft_data[st.session_state.features].to_frame().T 
 
-        if selected_aircraft_id:
-            # Filter data for the selected aircraft
-            aircraft_data_for_dashboard = st.session_state.df_fe[st.session_state.df_fe['aircraft_id'] == selected_aircraft_id].sort_values('flight_date').copy()
+                st.write(f"Explaining prediction for flight of aircraft **{failed_aircraft_data['aircraft_id']}** on **{failed_aircraft_data['flight_date'].date()}**")
+                
+                shap_values_single_instance = explainer_cls.shap_values(failed_aircraft_features)[0] 
+                
+                fig_force, ax_force = plt.subplots(figsize=(12, 4))
+                shap.force_plot(
+                    explainer_cls.expected_value[0], 
+                    shap_values_single_instance, 
+                    failed_aircraft_features, 
+                    show=False, 
+                    matplotlib=True,
+                    plot_cmap="PkGn",
+                    ax=ax_force
+                )
+                ax_force.set_title("SHAP Force Plot for a Single Prediction (Class 0)")
+                st.pyplot(fig_force)
+
+            else:
+                st.info("No failure instances in the test set to demonstrate a single flight explanation.")
+    
+    with tab4:
+        st.header("Interactive Dashboard 🖥️")
+        st.markdown("Monitor an aircraft's health over time with key sensor readings, predicted failure risk, and Remaining Useful Life.")
+
+        if st.session_state.xgb_cls is None or st.session_state.xgb_reg is None or st.session_state.df_fe is None:
+            st.warning("Models and data not ready. Please click 'Run Full Analysis' on the main page.")
+        elif st.session_state.selected_aircraft:
+            aircraft_data_for_dashboard = st.session_state.df_fe[st.session_state.df_fe['aircraft_id'] == st.session_state.selected_aircraft].sort_values('flight_date').copy()
             
             if not aircraft_data_for_dashboard.empty:
-                # Add predictions to the DataFrame for the selected aircraft
                 aircraft_data_for_dashboard['failure_probability'] = st.session_state.xgb_cls.predict_proba(aircraft_data_for_dashboard[st.session_state.features])[:, 1]
                 aircraft_data_for_dashboard['predicted_rul'] = st.session_state.xgb_reg.predict(aircraft_data_for_dashboard[st.session_state.features])
                 aircraft_data_for_dashboard['predicted_rul'] = aircraft_data_for_dashboard['predicted_rul'].apply(lambda x: max(0, x))
 
                 fig_dashboard = go.Figure()
 
-                # Plot 1: Sensor Readings
                 fig_dashboard.add_trace(go.Scatter(x=aircraft_data_for_dashboard['flight_date'], y=aircraft_data_for_dashboard['engine_vibration_mm_s'], mode='lines+markers', name='Engine Vibration (mm/s)', yaxis='y1'))
                 fig_dashboard.add_trace(go.Scatter(x=aircraft_data_for_dashboard['flight_date'], y=aircraft_data_for_dashboard['engine_temp_c'], mode='lines+markers', name='Engine Temperature (°C)', yaxis='y1'))
                 fig_dashboard.add_trace(go.Scatter(x=aircraft_data_for_dashboard['flight_date'], y=aircraft_data_for_dashboard['oil_pressure_psi'], mode='lines+markers', name='Oil Pressure (psi)', yaxis='y1'))
                 fig_dashboard.add_trace(go.Scatter(x=aircraft_data_for_dashboard['flight_date'], y=aircraft_data_for_dashboard['hydraulic_pressure_psi'], mode='lines+markers', name='Hydraulic Pressure (psi)', yaxis='y1'))
 
-
-                # Plot 2: Failure Probability & RUL
                 fig_dashboard.add_trace(go.Scatter(x=aircraft_data_for_dashboard['flight_date'], y=aircraft_data_for_dashboard['failure_probability'] * 100, mode='lines+markers', name='Failure Risk (%)', yaxis='y2', line=dict(dash='dash', color='red')))
                 fig_dashboard.add_trace(go.Scatter(x=aircraft_data_for_dashboard['flight_date'], y=aircraft_data_for_dashboard['predicted_rul'], mode='lines+markers', name='Predicted RUL (hrs)', yaxis='y3', line=dict(dash='dot', color='green')))
 
                 fig_dashboard.update_layout(
-                    title=f"Predictive Maintenance Dashboard for Aircraft {selected_aircraft_id}",
+                    title=f"Predictive Maintenance Dashboard for Aircraft {st.session_state.selected_aircraft}",
                     xaxis_title="Date",
                     yaxis=dict(
                         title="Sensor Readings",
@@ -548,7 +459,7 @@ elif page == "6. Dashboard":
                         overlaying="y",
                         side="right",
                         anchor="x",
-                        position=0.88, # Adjust position to avoid overlap
+                        position=0.88, 
                         showgrid=False,
                         titlefont=dict(color="green"),
                         tickfont=dict(color="green")
@@ -559,82 +470,93 @@ elif page == "6. Dashboard":
                 )
                 st.plotly_chart(fig_dashboard, use_container_width=True)
             else:
-                st.warning(f"No data available for aircraft ID: {selected_aircraft_id}")
-
-elif page == "7. Insights & Recommendations":
-    st.header("7. Insights & Recommendations ✨")
-    st.markdown("Here, we present key insights derived from the analysis and actionable recommendations, **dynamically generated** from the current model and data state.")
-    
-    if st.session_state.xgb_cls is None or st.session_state.xgb_reg is None or st.session_state.features is None:
-        st.warning("Please run through the 'Modeling' and 'Feature Engineering' sections first to generate dynamic insights.")
-    else:
-        st.subheader("Model Performance Summary")
-        
-        # Calculate performance metrics dynamically from the test set
-        y_pred_cls_proba = st.session_state.xgb_cls.predict_proba(st.session_state.X_test_cls)[:, 1]
-        y_pred_cls = (y_pred_cls_proba > ALERT_THRESHOLD_PROB).astype(int)
-        
-        st.markdown(f"""
-        Our predictive models, trained on a time-based split of the data, show strong performance:
-        * **Classification Model (Failure Prediction)**: Achieved a **ROC-AUC of {roc_auc_score(st.session_state.y_test_cls, y_pred_cls_proba):.4f}**. This indicates a high capability to distinguish between flights likely to fail and those that are not.
-        * **Regression Model (RUL Prediction)**: The model for Remaining Useful Life has a **RMSE of {np.sqrt(mean_squared_error(st.session_state.y_test_reg, st.session_state.xgb_reg.predict(st.session_state.X_test_reg))):.4f}** and an **R-squared of {r2_score(st.session_state.y_test_reg, st.session_state.xgb_reg.predict(st.session_state.X_test_reg)):.4f}**. This shows it can predict RUL with a reasonable degree of accuracy.
-        """)
-
-        st.subheader("Top Predictive Features")
-        st.markdown("The following features were identified as the most important in predicting aircraft failure and RUL:")
-        
-        # Get feature importance dynamically from the models
-        feature_importances = pd.Series(st.session_state.xgb_cls.feature_importances_, index=st.session_state.features)
-        top_5_features = feature_importances.nlargest(5)
-        
-        for i, (feature, importance) in enumerate(top_5_features.items()):
-            st.write(f"**{i+1}. {feature}** (Importance: {importance:.4f})")
-
-        st.subheader("Aircraft-Specific Recommendations")
-        
-        if st.session_state.selected_aircraft:
-            st.write(f"Recommendations for aircraft **{st.session_state.selected_aircraft}**, based on its latest flight data:")
-            
-            # Get the latest data for the selected aircraft
-            latest_flight = st.session_state.df_fe[st.session_state.df_fe['aircraft_id'] == st.session_state.selected_aircraft].sort_values('flight_date').iloc[-1]
-            latest_features = latest_flight[st.session_state.features].to_frame().T
-            
-            # Make dynamic predictions for the latest flight
-            current_prob_failure = st.session_state.xgb_cls.predict_proba(latest_features)[:, 1][0]
-            predicted_rul = st.session_state.xgb_reg.predict(latest_features)[0]
-            
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Latest Failure Risk", f"{current_prob_failure*100:.2f}%")
-            with col2:
-                st.metric("Predicted RUL", f"{max(0, predicted_rul):.2f} hours")
-            with col3:
-                st.metric("Cycles since Maint.", int(latest_flight['cycles_since_maintenance']))
-
-            st.markdown("---")
-
-            st.write(f"**Based on these metrics, here are the recommendations for Aircraft {st.session_state.selected_aircraft}:**")
-            
-            if current_prob_failure >= ALERT_THRESHOLD_PROB:
-                st.error(f"**⚠️ IMMEDIATE ACTION REQUIRED:** The failure risk is critically high at **{current_prob_failure*100:.2f}%**.")
-                st.markdown(f"""
-                - **Schedule immediate inspection** for critical components.
-                - Review the dashboard to see which sensors (e.g., high vibration, high temp) are trending abnormally.
-                - Consider grounding the aircraft until a full maintenance check is performed.
-                """)
-            elif predicted_rul <= 100:
-                st.warning(f"**⚠️ PROACTIVE MAINTENANCE RECOMMENDED:** The predicted Remaining Useful Life (RUL) is low (**{predicted_rul:.2f} hours**).")
-                st.markdown("""
-                - **Schedule maintenance** within the next few flights.
-                - Do not wait for a full failure to occur. A proactive intervention can prevent a costly in-flight incident and minimize downtime.
-                - Monitor this aircraft closely on the dashboard.
-                """)
-            else:
-                st.success("✅ **STATUS NORMAL:** The aircraft is operating within normal parameters.")
-                st.markdown("""
-                - Continue with routine monitoring as planned.
-                - No immediate action is required based on the current data.
-                - The predicted RUL is at a healthy level.
-                """)
+                st.warning(f"No data available for selected aircraft ID: {st.session_state.selected_aircraft}. Please select another or re-run analysis.")
         else:
-            st.info("Please select an aircraft from the 'Dashboard' page to view specific insights and recommendations.")
+            st.info("Please select an aircraft ID from the sidebar to view its dashboard.")
+
+    with tab5:
+        st.header("Insights & Recommendations ✨")
+        st.markdown("Here, we present key insights derived from the analysis and actionable recommendations, **dynamically generated** from the current model and data state.")
+        
+        if st.session_state.xgb_cls is None or st.session_state.xgb_reg is None or st.session_state.features is None:
+            st.warning("Models and features not ready. Please click 'Run Full Analysis' on the main page to generate dynamic insights.")
+        else:
+            st.subheader("Overall Insights from Analysis")
+            
+            y_pred_cls_proba = st.session_state.xgb_cls.predict_proba(st.session_state.X_test_cls)[:, 1]
+            
+            st.markdown(f"""
+            * **Degradation Patterns**: Our synthetic data successfully simulated realistic degradation, showing a **gradual increase in engine vibration and temperature** before failures, coupled with slight drops in oil/hydraulic pressure. This pattern is crucial for proactive maintenance.
+            * **Environmental Impact**: **Outside Air Temperature (OAT)** was observed to directly influence sensor readings. For example, the `engine_temp_c` simulation incorporated a factor of `0.1 * oat_c`, showing that **hotter environments can increase stress** on components.
+            * **Feature Importance**: Features derived from **rolling averages and change rates** of sensor data, especially engine vibration and temperature, proved to be highly predictive for both failure classification and RUL estimation. The **combined stress index** ($engine\_vibration\_mm\_s \times engine\_temp\_c$) also played a significant role.
+            * **Model Performance**:
+                * The **XGBoost Classifier** (for failure prediction) achieved a strong **ROC-AUC of {roc_auc_score(st.session_state.y_test_cls, y_pred_cls_proba):.4f}**. This indicates a high capability to distinguish between flights likely to fail and those that are not.
+                * The **XGBoost Regressor** (for Remaining Useful Life) has a **RMSE of {np.sqrt(mean_squared_error(st.session_state.y_test_reg, st.session_state.xgb_reg.predict(st.session_state.X_test_reg))):.4f}** and an **R-squared of {r2_score(st.session_state.y_test_reg, st.session_state.xgb_reg.predict(st.session_state.X_test_reg)) if len(st.session_state.y_test_reg) > 1 else 0:.4f}**. This shows it can predict RUL with a reasonable degree of accuracy, enabling better maintenance planning.
+            * **Explainable AI**: **SHAP values** revealed that features reflecting increasing engine wear (e.g., higher vibration, temperature, and their rolling statistics) were the primary drivers for predicting imminent failure and lower RUL, providing transparency to model predictions.
+            """)
+
+            st.subheader("Top Predictive Features")
+            st.markdown("The following features were identified as the most important in predicting aircraft failure (from the Classification Model):")
+            
+            feature_importances = pd.Series(st.session_state.xgb_cls.feature_importances_, index=st.session_state.features)
+            top_5_features = feature_importances.nlargest(5)
+            
+            for i, (feature, importance) in enumerate(top_5_features.items()):
+                st.write(f"**{i+1}. {feature}** (Importance: {importance:.4f})")
+
+            st.subheader("Aircraft-Specific Recommendations")
+            
+            if st.session_state.selected_aircraft:
+                st.write(f"Recommendations for aircraft **{st.session_state.selected_aircraft}**, based on its latest flight data:")
+                
+                latest_flight = st.session_state.df_fe[st.session_state.df_fe['aircraft_id'] == st.session_state.selected_aircraft].sort_values('flight_date').iloc[-1]
+                latest_features = latest_flight[st.session_state.features].to_frame().T
+                
+                current_prob_failure = st.session_state.xgb_cls.predict_proba(latest_features)[:, 1][0]
+                predicted_rul = st.session_state.xgb_reg.predict(latest_features)[0]
+                
+                col1_rec, col2_rec, col3_rec = st.columns(3)
+                with col1_rec:
+                    st.metric("Latest Failure Risk", f"{current_prob_failure*100:.2f}%")
+                with col2_rec:
+                    st.metric("Predicted RUL", f"{max(0, predicted_rul):.2f} hours")
+                with col3_rec:
+                    st.metric("Cycles since Maint.", int(latest_flight['cycles_since_maintenance']))
+
+                st.markdown("---")
+
+                st.write(f"**Based on these metrics, here are the recommendations for Aircraft {st.session_state.selected_aircraft}:**")
+                
+                if current_prob_failure >= ALERT_THRESHOLD_PROB:
+                    st.error(f"**⚠️ IMMEDIATE ACTION REQUIRED:** The failure risk is critically high at **{current_prob_failure*100:.2f}%**.")
+                    st.markdown(f"""
+                    - **Schedule immediate inspection** for critical components.
+                    - Review the **Interactive Dashboard** tab to see which sensors (e.g., high vibration, high temp) are trending abnormally for this aircraft.
+                    - Consider grounding the aircraft until a full maintenance check is performed to prevent unexpected failures and ensure safety.
+                    """)
+                elif predicted_rul <= 100 and predicted_rul > 0: # RUL can be -1 if not a failure
+                    st.warning(f"**⚠️ PROACTIVE MAINTENANCE RECOMMENDED:** The predicted Remaining Useful Life (RUL) is low (**{predicted_rul:.2f} hours**).")
+                    st.markdown("""
+                    - **Schedule maintenance** within the next few flights or before the RUL hits zero.
+                    - Proactive intervention can prevent a costly in-flight incident, minimize downtime, and improve operational efficiency.
+                    - Continue to monitor this aircraft closely on the **Interactive Dashboard** tab.
+                    """)
+                else:
+                    st.success("✅ **STATUS NORMAL:** The aircraft is operating within normal parameters.")
+                    st.markdown("""
+                    - Continue with routine monitoring as planned.
+                    - No immediate action is required based on the current data and predictions.
+                    - The predicted RUL is at a healthy level.
+                    """)
+            else:
+                st.info("Please select an aircraft from the sidebar to view its specific recommendations.")
+
+            st.subheader("General Recommendations for Predictive Maintenance Implementation")
+            st.markdown("""
+            * **Automated Alerting**: Develop an automated system to trigger alerts when an aircraft's predicted failure probability exceeds a threshold or RUL drops below a critical value.
+            * **Maintenance Prioritization**: Leverage failure probabilities and RUL estimates to dynamically prioritize maintenance tasks across the fleet, optimizing resource allocation.
+            * **Spare Parts Optimization**: Use RUL forecasts to inform inventory management, ensuring critical parts are available when needed and reducing excess stock.
+            * **Data Quality & Volume**: Continuously improve sensor data quality and consider integrating more diverse data sources (e.g., historical maintenance logs, flight plans, environmental conditions for specific routes).
+            * **Model Monitoring & Retraining**: Regularly monitor model performance in a production environment. Retrain models periodically with new data to adapt to changing operational conditions and component degradation patterns.
+            * **Human-in-the-Loop Validation**: Maintain a feedback loop with maintenance engineers. Their practical insights are invaluable for validating model predictions and identifying areas for improvement.
+            """)

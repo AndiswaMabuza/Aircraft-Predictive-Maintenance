@@ -9,7 +9,7 @@ from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_sco
 import shap
 from tqdm import tqdm
 from datetime import datetime, timedelta
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt # Needed for SHAP plots with st.pyplot
 
 # Set page configuration for a wide layout and a custom title
 st.set_page_config(layout="wide", page_title="Aircraft Predictive Maintenance Dashboard")
@@ -167,8 +167,8 @@ def feature_engineer_data(df_input):
 
     for window in window_sizes:
         for feature in features_to_roll:
-            df_fe[f'rolling_avg_{feature}_{window}fl'] = df_fe.groupby('aircraft_id')[feature].rolling(window=window, min_periods=1).mean().reset_index(level=0, drop=True)
-            df_fe[f'rolling_std_{feature}_{window}fl'] = df_fe.groupby('aircraft_id')[feature].rolling(window=window, min_periods=1).std().reset_index(level=0, drop=True)
+            df_fe[f'rolling_avg_{feature}_{window}fl'] = df_fe.groupby('aircraft_id')[feature].rolling(window=window, min_periods=1).mean().reset_index(level=0, drop_True)
+            df_fe[f'rolling_std_{feature}_{window}fl'] = df_fe.groupby('aircraft_id')[feature].rolling(window=window, min_periods=1).std().reset_index(level=0, drop_True)
 
     # Fill NaNs from rolling std (which would be 0 for the first elements in a window)
     for col in df_fe.columns:
@@ -261,9 +261,6 @@ data = generate_synthetic_data(N_AIRCRAFT, N_FLIGHTS, FAILURE_RATE, FLIGHT_START
 df_fe = feature_engineer_data(data)
 xgb_cls, xgb_reg, X_test_cls, y_test_cls, X_test_reg, y_test_reg, features, test_df = train_predictive_models(df_fe)
 
-# --- Initialize session state variables if not already present ---
-if 'selected_aircraft' not in st.session_state:
-    st.session_state.selected_aircraft = None # Will be set by selectbox later
 
 # --- Sidebar for Aircraft Selection ---
 available_aircraft_ids = df_fe['aircraft_id'].unique()
@@ -379,7 +376,6 @@ with tab2:
     st.header("Model Performance 🧠")
     st.markdown("Evaluating the performance of our XGBoost Classification and Regression models on unseen test data.")
 
-    st.subheader("Classification Model Evaluation (Predicting Failure)")
     if xgb_cls is not None:
         y_pred_cls = xgb_cls.predict(X_test_cls)
         y_pred_proba_cls = xgb_cls.predict_proba(X_test_cls)[:, 1]
@@ -413,10 +409,12 @@ with tab3:
         explainer_cls = shap.TreeExplainer(xgb_cls)
         shap_values_cls = explainer_cls.shap_values(X_test_cls)
         
+        # Create a matplotlib figure and axes before calling shap.summary_plot
         fig_shap_cls, ax_cls = plt.subplots(figsize=(10, 6))
-        shap.summary_plot(shap_values_cls, X_test_cls, plot_type="bar", show=False, ax=ax_cls)
+        shap.summary_plot(shap_values_cls, X_test_cls, plot_type="bar", show=False) # Removed ax=ax_cls
         ax_cls.set_title("SHAP Feature Importance (Classification)")
         st.pyplot(fig_shap_cls)
+        plt.clf() # Clear the current figure to prevent display issues
 
     if xgb_reg is None:
         st.warning("Regression model not trained. Cannot generate SHAP plots.")
@@ -426,9 +424,10 @@ with tab3:
         shap_values_reg = explainer_reg.shap_values(X_test_reg)
 
         fig_shap_reg, ax_reg = plt.subplots(figsize=(10, 6))
-        shap.summary_plot(shap_values_reg, X_test_reg, show=False, ax=ax_reg)
+        shap.summary_plot(shap_values_reg, X_test_reg, show=False) # Removed ax=ax_reg
         ax_reg.set_title("SHAP Feature Importance (Regression)")
         st.pyplot(fig_shap_reg)
+        plt.clf() # Clear the current figure
 
     st.subheader("Example SHAP Force Plot for a Single Flight (Classification)")
     if y_test_cls.sum() > 0 and xgb_cls is not None:
@@ -440,7 +439,8 @@ with tab3:
         st.write(f"Explaining prediction for flight of aircraft **{failed_aircraft_data['aircraft_id']}** on **{failed_aircraft_data['flight_date'].date()}**:")
         
         explainer_cls_single = shap.TreeExplainer(xgb_cls)
-        shap_values_single_instance = explainer_cls_single.shap_values(failed_aircraft_features)[0] # For binary classification, take values for one class (e.g., class 0 or 1)
+        # Force plot for a single instance - [0] for the first class (non-failure contribution)
+        shap_values_single_instance = explainer_cls_single.shap_values(failed_aircraft_features)[0] 
         
         fig_force, ax_force = plt.subplots(figsize=(12, 4))
         shap.force_plot(
@@ -450,10 +450,11 @@ with tab3:
             show=False, 
             matplotlib=True,
             plot_cmap="PkGn",
-            ax=ax_force
+            ax=ax_force # 'ax' argument for force_plot is typically supported
         )
-        ax_force.set_title("SHAP Force Plot for a Single Prediction (Class 0 Contribution)")
+        ax_force.set_title("SHAP Force Plot for a Single Prediction (Contribution to Class 0)")
         st.pyplot(fig_force)
+        plt.clf() # Clear the current figure
 
     else:
         st.info("No failure instances in the test set or classification model not trained to demonstrate a single flight explanation.")
